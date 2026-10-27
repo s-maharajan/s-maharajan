@@ -1,0 +1,20 @@
+# Local secrets and developer files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+*.mobileprovision
+/credentials.json
+/service-account*.json
+
+# Committable templates contain placeholders only (keep after environment rules).
+!.env.example
+!.env.*.example
+!.env.sample
