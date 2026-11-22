@@ -1,0 +1,72 @@
+name: Snyk
+
+# Snyk Open Source (dependencies, every manifest in the repo) + Snyk Code (SAST).
+# Fails on high/critical. On main it also runs `snyk monitor` so the repo shows up
+# in the Snyk dashboard and you get emailed about new CVEs. Runs only when the
+# SNYK_TOKEN repo secret is set; otherwise it skips with a notice.
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  schedule:
+    - cron: '23 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  snyk:
+    name: Snyk
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+      SNYK_CLI: snyk@1.1309.0
+    steps:
+      - name: Check Snyk token
+        id: token
+        run: |
+          if [ -z "$SNYK_TOKEN" ]; then
+            echo "::notice::SNYK_TOKEN secret is not set; skipping Snyk."
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.token.outputs.ok == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - if: steps.token.outputs.ok == 'true'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - name: Install dependencies (so Snyk can resolve them)
+        if: steps.token.outputs.ok == 'true'
+        run: |
+          find . -name package-lock.json -not -path '*/node_modules/*' | while read -r f; do
+            (cd "$(dirname "$f")" && npm ci --ignore-scripts --no-audit --no-fund) || true; done
+          if find . -name 'requirements*.txt' -not -path '*/node_modules/*' | grep -q .; then
+            python3 -m pip install --quiet --upgrade pip
+            find . -name 'requirements*.txt' -not -path '*/node_modules/*' -exec python3 -m pip install --quiet -r {} \; || true
+          fi
+      - name: Snyk Open Source
+        if: steps.token.outputs.ok == 'true'
+        run: |
+          set +e
+          npx --yes "$SNYK_CLI" test --all-projects --detection-depth=4 --severity-threshold=high
+          rc=$?
+          # 3 = no supported manifests in this repo: nothing to scan, not a failure
+          [ $rc -eq 3 ] && { echo "::notice::No dependency manifests found."; exit 0; }
+          exit $rc
+      - name: Snyk Code
+        if: steps.token.outputs.ok == 'true'
+        run: |
+          set +e
+          npx --yes "$SNYK_CLI" code test --severity-threshold=high
+          rc=$?
+          [ $rc -eq 3 ] && { echo "::notice::No supported source files."; exit 0; }
+          exit $rc
+      - name: Snyk monitor (dashboard + alerts)
+        if: steps.token.outputs.ok == 'true' && github.event_name != 'pull_request' && github.ref_name == github.event.repository.default_branch
+        run: npx --yes "$SNYK_CLI" monitor --all-projects --detection-depth=4 --project-tags=owner=s-maharajan || true
