@@ -6,11 +6,14 @@ name: Snyk
 # SNYK_TOKEN repo secret is set; otherwise it skips with a notice.
 on:
   push:
-    branches: [main, master]
   pull_request:
   schedule:
     - cron: '23 6 * * 1'
   workflow_dispatch:
+  workflow_call:
+    secrets:
+      SNYK_TOKEN:
+        required: false
 
 permissions:
   contents: read
